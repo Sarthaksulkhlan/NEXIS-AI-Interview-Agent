@@ -2,22 +2,12 @@ import React, { useState } from 'react';
 import {
   ViewMode,
   CandidateProfile,
-  QuestionTopic,
-  QuestionItem,
-  AnswerSubmission,
-  AssessmentReport,
   InterviewSession,
 } from './types';
-import {
-  allCandidateProfiles,
-  generateQuestionsForCandidate,
-} from './data/dataLoader';
-import { sampleReport, initialSessions } from './data/mockData';
+import { allCandidateProfiles } from './data/dataLoader';
 import { Header } from './components/Header';
 import { ShaderBackground } from './components/ShaderBackground';
 import { DashboardView } from './components/DashboardView';
-import { WorkspaceView } from './components/WorkspaceView';
-import { AssessmentReportView } from './components/AssessmentReportView';
 import { HistoryView } from './components/HistoryView';
 import { SettingsView } from './components/SettingsView';
 import { Footer } from './components/Footer';
@@ -51,13 +41,7 @@ export default function App() {
   });
   const [realSessionId, setRealSessionId] = useState(() => sessionStorage.getItem(INTERVIEW_SESSION_KEY) || '');
 
-  // Initial questions based on default candidate
-  const initialGenerated = generateQuestionsForCandidate(allCandidateProfiles[0]);
-  const [topics, setTopics] = useState<QuestionTopic[]>(initialGenerated.topics);
-  const [questions, setQuestions] = useState<QuestionItem[]>(initialGenerated.questions);
-
-  const [report, setReport] = useState<AssessmentReport>(sampleReport);
-  const [sessions, setSessions] = useState<InterviewSession[]>(initialSessions);
+  const [sessions] = useState<InterviewSession[]>([]);
 
   const navigateTo = (view: ViewMode) => {
     const nextPath = view === 'workspace' ? '/interview' : view === 'report' ? '/feedback' : '/';
@@ -70,9 +54,6 @@ export default function App() {
   // When candidate is selected / changed
   const handleSelectCandidateProfile = (selectedCandidate: CandidateProfile) => {
     setCandidate(selectedCandidate);
-    const generated = generateQuestionsForCandidate(selectedCandidate);
-    setTopics(generated.topics);
-    setQuestions(generated.questions);
     sessionStorage.setItem(SELECTED_CANDIDATE_KEY, JSON.stringify(selectedCandidate.rawRecord));
   };
 
@@ -102,103 +83,13 @@ export default function App() {
     }
   };
 
-  const handleCompleteSession = async (submissions: AnswerSubmission[]) => {
-    try {
-      // Call backend API to synthesize full assessment report
-      const response = await fetch('/api/generate-report', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          candidateName: candidate.name,
-          targetRole: candidate.targetRole,
-          qaPairs: submissions.map((s) => ({
-            question: s.questionText,
-            userAnswer: s.userAnswer,
-            aiFeedback: s.aiFeedback,
-          })),
-        }),
-      });
-
-      if (response.ok) {
-        const generated: AssessmentReport = await response.json();
-        const fullReport: AssessmentReport = {
-          sessionId: `NEX-${Math.floor(1000 + Math.random() * 9000)}-X`,
-          candidateName: candidate.name,
-          targetRole: candidate.targetRole,
-          timestamp: new Date().toISOString(),
-          overallScore: generated.overallScore || 85,
-          scoreBadge: generated.scoreBadge || 'STRONG TECHNICAL PERFORMANCE',
-          aiSynthesis: generated.aiSynthesis || sampleReport.aiSynthesis,
-          competency: generated.competency || sampleReport.competency,
-          proficiencies: generated.proficiencies || sampleReport.proficiencies,
-          strengths: generated.strengths || sampleReport.strengths,
-          growthAreas: generated.growthAreas || sampleReport.growthAreas,
-          roadmap: generated.roadmap || sampleReport.roadmap,
-          timeline: submissions.map((sub, i) => ({
-            time: sub.timestamp || `14:${10 + i * 12}:00`,
-            question: sub.questionText,
-            userAnswer: sub.userAnswer,
-            feedback: sub.aiFeedback || 'Solid technical approach addressing primary architectural constraints.',
-            score: sub.score || 8,
-            badgeType: (sub.score || 8) >= 8 ? 'primary' : (sub.score || 8) >= 6 ? 'secondary' : 'error',
-          })),
-        };
-
-        setReport(fullReport);
-
-        const newSessionRecord: InterviewSession = {
-          id: fullReport.sessionId,
-          date: new Date().toISOString().split('T')[0],
-          candidateName: candidate.name,
-          targetRole: candidate.targetRole,
-          overallScore: fullReport.overallScore,
-          status: 'Completed',
-          questionsAnswered: submissions.length,
-          totalQuestions: questions.length,
-          report: fullReport,
-        };
-
-        setSessions((prev) => [newSessionRecord, ...prev]);
-      } else {
-        setReport({
-          ...sampleReport,
-          candidateName: candidate.name,
-          targetRole: candidate.targetRole,
-        });
-      }
-    } catch (error) {
-      console.error('Failed to generate report:', error);
-      setReport({
-        ...sampleReport,
-        candidateName: candidate.name,
-        targetRole: candidate.targetRole,
-      });
-    }
-
-    navigateTo('report');
-  };
-
   const handleEndSessionEarly = () => {
-    setReport({
-      ...sampleReport,
-      candidateName: candidate.name,
-      targetRole: candidate.targetRole,
-    });
+    setRealFeedback(null);
     navigateTo('report');
   };
 
-  const handleSelectSessionReport = (session: InterviewSession) => {
-    if (session.report) {
-      setReport(session.report);
-    } else {
-      setReport({
-        ...sampleReport,
-        sessionId: session.id,
-        candidateName: session.candidateName,
-        targetRole: session.targetRole,
-        overallScore: session.overallScore,
-      });
-    }
+  const handleSelectSessionReport = (_session: InterviewSession) => {
+    setRealFeedback(null);
     navigateTo('report');
   };
 
@@ -214,7 +105,7 @@ export default function App() {
         onEndSession={handleEndSessionEarly}
         onOpenModal={setActiveModal}
         questionIndex={1}
-        totalQuestions={questions.length}
+        totalQuestions={0}
       />
 
       {/* View Switcher */}
