@@ -1,20 +1,50 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# NEXIS-AI-Interview-Agent
 
-# Run and deploy your AI Studio app
+Nexis AI Interview Agent is a React/Vite application for curriculum-grounded, multi-turn technical interviews.
 
-This contains everything you need to run your app locally.
-
-View your app in AI Studio: https://ai.studio/apps/39e55474-48dc-420e-90a0-e44e536cd7ed
+The root app owns the Nexis landing page, candidate selection, `/interview`, and `/feedback` experience. The interview runtime uses the linked backend in `external/vibecode-final` through the real `/api/interview` contract.
 
 ## Run Locally
 
-**Prerequisites:**  Node.js
+Prerequisites:
 
+- Node.js
+- Python for the FastAPI backend
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+Install root frontend dependencies:
+
+```powershell
+npm install
+```
+
+Start the friend backend:
+
+```powershell
+cd external\vibecode-final\backend
+python -m pip install -r requirements.txt
+python -m pip install python-multipart
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+Start the Nexis root app:
+
+```powershell
+cd C:\Users\user\Downloads\nexis-ai-interview-agent
+npm run dev
+```
+
+Open:
+
+```text
+http://localhost:3000
+```
+
+## Routes
+
+- `/` - Nexis landing page and candidate selection
+- `/interview` - real multi-turn interview flow
+- `/feedback` - real backend feedback displayed in the Nexis UI
+
+## License
+
+MIT
