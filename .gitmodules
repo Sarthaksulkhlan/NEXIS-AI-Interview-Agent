@@ -1,0 +1,3 @@
+[submodule "external/vibecode-final"]
+	path = external/vibecode-final
+	url = https://github.com/Jay1719-git/vibecode-final.git

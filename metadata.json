@@ -1,0 +1,6 @@
+{
+  "name": "Nexis AI Interview Agent",
+  "description": "Personalized AI technical interview platform based on 31-day AI engineering cohort journeys and candidate mission analysis.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
