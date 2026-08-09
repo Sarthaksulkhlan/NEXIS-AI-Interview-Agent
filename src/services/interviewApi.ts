@@ -37,6 +37,38 @@ export interface SessionStateResponse {
     type: string;
     objectives: string[];
   }>;
+  question_log: Array<{
+    id: number; day: number; topic: string; type: string; difficulty: string;
+    text: string; is_followup: boolean; follow_up_reason?: string | null;
+  }>;
+  answer_log: Array<{
+    question_id: number; day: number; text: string;
+    evaluation: {
+      addressed_objectives: number[];
+      scores: Record<'correctness' | 'depth' | 'reasoning' | 'tradeoffs' | 'completeness', number>;
+      pattern: string;
+      rationale?: string | null;
+    };
+  }>;
+  multimodal_log?: Array<{
+    question_id: number;
+    transcript: string;
+    communication_feedback?: string | null;
+    audio_analysis: { duration_seconds: number; speech_detected: boolean; words_count: number; speaking_rate_wpm?: number | null };
+    video_analysis: { camera_available: boolean; candidate_visible: boolean; frame_count_sampled: number; frame_quality_ok: boolean; presentation_notes?: string | null };
+  }>;
+}
+
+export type IntegrityEventType =
+  | 'TAB_HIDDEN' | 'WINDOW_BLUR' | 'CAMERA_DISABLED' | 'CAMERA_INTERRUPTED'
+  | 'CAMERA_RECONNECTED' | 'MIC_DISABLED' | 'MIC_INTERRUPTED' | 'MIC_RECONNECTED';
+
+export interface IntegritySummary {
+  risk_level: 'NORMAL' | 'LOW RISK' | 'MEDIUM RISK' | 'HIGH RISK';
+  risk_score: number;
+  event_count: number;
+  reasons: string[];
+  review_required: boolean;
 }
 
 const parseError = async (response: Response, fallback: string) => {
@@ -84,15 +116,22 @@ export class InterviewApiService {
     try {
       const response = await fetch(`/api/session/${encodeURIComponent(sessionId)}`);
       if (!response.ok) return null;
-      return (await response.json()) as SessionStateResponse;
+      const body = (await response.json()) as SessionStateResponse;
+      return {
+        ...body,
+        // This additive field is absent from sessions produced by older/text-only
+        // backend deployments. Absence means no recorded multimodal results.
+        multimodal_log: body.multimodal_log ?? [],
+      };
     } catch {
       return null;
     }
   }
 
-  static async sendVideoTurn(sessionId: string, videoBlob: Blob): Promise<InterviewResponse> {
+  static async sendVideoTurn(sessionId: string, questionId: number, videoBlob: Blob): Promise<InterviewResponse> {
     const formData = new FormData();
     formData.append('sessionId', sessionId);
+    formData.append('questionId', String(questionId));
     formData.append('video', videoBlob, 'recording.webm');
 
     const response = await fetch('/api/interview/video', {
@@ -105,5 +144,26 @@ export class InterviewApiService {
     }
 
     return (await response.json()) as InterviewResponse;
+  }
+
+  static async recordIntegrityEvent(
+    sessionId: string,
+    event_type: IntegrityEventType,
+    metadata: Record<string, string | number> = {}
+  ): Promise<IntegritySummary> {
+    const response = await fetch(`/api/interview/${encodeURIComponent(sessionId)}/integrity/events`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ event_type, metadata }),
+    });
+    if (!response.ok) throw new Error(await parseError(response, 'Unable to record integrity signal.'));
+    const body = await response.json();
+    return body.summary as IntegritySummary;
+  }
+
+  static async getIntegritySummary(sessionId: string): Promise<IntegritySummary> {
+    const response = await fetch(`/api/interview/${encodeURIComponent(sessionId)}/integrity`);
+    if (!response.ok) throw new Error(await parseError(response, 'Unable to load integrity summary.'));
+    return (await response.json()) as IntegritySummary;
   }
 }

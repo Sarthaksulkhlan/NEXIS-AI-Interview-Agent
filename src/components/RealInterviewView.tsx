@@ -58,6 +58,7 @@ export const RealInterviewView: React.FC<RealInterviewViewProps> = ({
   const [videoMode, setVideoMode] = useState(false);
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
   const [cameraStatus, setCameraStatus] = useState<'idle' | 'ready' | 'denied'>('idle');
+  const [microphoneStatus, setMicrophoneStatus] = useState<'idle' | 'ready' | 'denied'>('idle');
   const [isRecording, setIsRecording] = useState(false);
   const [recordSeconds, setRecordSeconds] = useState(0);
   const startedRef = useRef(false);
@@ -65,6 +66,23 @@ export const RealInterviewView: React.FC<RealInterviewViewProps> = ({
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!sessionId || !messages.length || isComplete) return;
+    const record = (eventType: 'TAB_HIDDEN' | 'WINDOW_BLUR') => {
+      void InterviewApiService.recordIntegrityEvent(sessionId, eventType).catch(() => {
+        setError('An interview integrity signal could not be recorded. Your interview can continue.');
+      });
+    };
+    const onVisibility = () => { if (document.hidden) record('TAB_HIDDEN'); };
+    const onBlur = () => record('WINDOW_BLUR');
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('blur', onBlur);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('blur', onBlur);
+    };
+  }, [isComplete, messages.length, sessionId]);
 
   useEffect(() => {
     sessionStorage.setItem(INTERVIEW_MESSAGES_KEY, JSON.stringify(messages));
@@ -110,8 +128,8 @@ export const RealInterviewView: React.FC<RealInterviewViewProps> = ({
           onFeedbackReady(response.feedback, sid);
         }
       })
-      .catch(() => {
-        setError('Interview service unavailable. Please try again.');
+      .catch((reason: unknown) => {
+        setError(reason instanceof Error ? reason.message : 'Interview service unavailable. Please try again.');
       })
       .finally(() => setIsLoading(false));
   }, [candidateRecord, messages.length, onFeedbackReady, sessionId]);
@@ -154,8 +172,8 @@ export const RealInterviewView: React.FC<RealInterviewViewProps> = ({
           setError('No interview feedback available.');
         }
       }
-    } catch {
-      setError('Interview service unavailable. Please try again.');
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Interview service unavailable. Please try again.');
     } finally {
       setIsLoading(false);
     }
@@ -169,17 +187,50 @@ export const RealInterviewView: React.FC<RealInterviewViewProps> = ({
     }
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 640 }, height: { ideal: 420 } },
-        audio: true,
-      });
+      const [videoResult, audioResult] = await Promise.allSettled([
+        navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 640 }, height: { ideal: 420 } }, audio: false }),
+        navigator.mediaDevices.getUserMedia({ video: false, audio: true }),
+      ]);
+      setCameraStatus(videoResult.status === 'fulfilled' ? 'ready' : 'denied');
+      setMicrophoneStatus(audioResult.status === 'fulfilled' ? 'ready' : 'denied');
+      if (videoResult.status === 'rejected' || audioResult.status === 'rejected') {
+        if (videoResult.status === 'fulfilled') videoResult.value.getTracks().forEach((track) => track.stop());
+        if (audioResult.status === 'fulfilled') audioResult.value.getTracks().forEach((track) => track.stop());
+        const missing = [videoResult.status === 'rejected' ? 'camera' : '', audioResult.status === 'rejected' ? 'microphone' : ''].filter(Boolean).join(' and ');
+        void Promise.allSettled([
+          ...(videoResult.status === 'rejected' ? [InterviewApiService.recordIntegrityEvent(sessionId, 'CAMERA_DISABLED', { reason: 'permission_denied_or_unavailable' })] : []),
+          ...(audioResult.status === 'rejected' ? [InterviewApiService.recordIntegrityEvent(sessionId, 'MIC_DISABLED', { reason: 'permission_denied_or_unavailable' })] : []),
+        ]);
+        setError(`The ${missing} could not be enabled. Check browser permissions and connected devices, or use a text response.`);
+        return null;
+      }
+      const stream = new MediaStream([...videoResult.value.getVideoTracks(), ...audioResult.value.getAudioTracks()]);
       setCameraStream(stream);
       setCameraStatus('ready');
+      setMicrophoneStatus('ready');
       setError(null);
+      stream.getVideoTracks().forEach((track) => {
+        track.addEventListener('ended', () => {
+          setCameraStatus('denied');
+          void InterviewApiService.recordIntegrityEvent(sessionId, 'CAMERA_INTERRUPTED', { track_kind: 'video' });
+        });
+      });
+      stream.getAudioTracks().forEach((track) => {
+        track.addEventListener('ended', () => {
+          setMicrophoneStatus('denied');
+          void InterviewApiService.recordIntegrityEvent(sessionId, 'MIC_INTERRUPTED', { track_kind: 'audio' });
+        });
+      });
       return stream;
-    } catch {
+    } catch (reason) {
       setCameraStatus('denied');
-      setError('Camera or microphone permission denied. You can continue with text response.');
+      setMicrophoneStatus('denied');
+      const permissionDenied = reason instanceof DOMException && reason.name === 'NotAllowedError';
+      setError(permissionDenied ? 'Media permission was denied. You can continue with a text response.' : 'Media devices are unavailable. You can continue with a text response.');
+      void Promise.allSettled([
+        InterviewApiService.recordIntegrityEvent(sessionId, 'CAMERA_DISABLED', { reason: permissionDenied ? 'permission_denied' : 'device_unavailable' }),
+        InterviewApiService.recordIntegrityEvent(sessionId, 'MIC_DISABLED', { reason: permissionDenied ? 'permission_denied' : 'device_unavailable' }),
+      ]);
       return null;
     }
   };
@@ -241,7 +292,12 @@ export const RealInterviewView: React.FC<RealInterviewViewProps> = ({
     ]);
 
     try {
-      const response = await InterviewApiService.sendVideoTurn(sessionId, videoBlob);
+      if (videoBlob.size === 0 || !videoBlob.type.startsWith('video/webm')) {
+        throw new Error('The browser produced an empty or unsupported recording. Please record again or use a text response.');
+      }
+      const questionId = sessionState?.questions_asked;
+      if (!questionId) throw new Error('The current backend question could not be identified. Refresh the session before recording.');
+      const response = await InterviewApiService.sendVideoTurn(sessionId, questionId, videoBlob);
       const transcript = response.multimodal_analysis?.transcript;
       if (transcript) {
         setMessages((items) => items.map((item, index) => (
@@ -266,8 +322,8 @@ export const RealInterviewView: React.FC<RealInterviewViewProps> = ({
         if (response.feedback) onFeedbackReady(response.feedback, sessionId);
         else setError('No interview feedback available.');
       }
-    } catch {
-      setError('Interview service unavailable. Please try again.');
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Interview service unavailable. Please try again.');
     } finally {
       setIsLoading(false);
     }
@@ -406,25 +462,25 @@ export const RealInterviewView: React.FC<RealInterviewViewProps> = ({
                       </div>
                       <div className="rounded-lg bg-[#05070a] border border-[#1f2937] px-3 py-2 flex items-center gap-2">
                         <Mic className="w-4 h-4 text-[#d0bcff]" />
-                        Microphone: {cameraStatus === 'ready' ? 'Ready' : cameraStatus === 'denied' ? 'Unavailable' : 'Not enabled'}
+                        Microphone: {microphoneStatus === 'ready' ? 'Ready' : microphoneStatus === 'denied' ? 'Unavailable' : 'Not enabled'}
                       </div>
                     </div>
 
                     <div className="flex flex-wrap gap-3">
-                      {cameraStatus !== 'ready' && (
+                      {(cameraStatus !== 'ready' || microphoneStatus !== 'ready') && (
                         <button
                           onClick={enableCamera}
                           disabled={isLoading || isComplete}
                           className="rounded-lg bg-[#0a0d14] border border-[#323539] text-[#e1e2e7] px-4 py-2 font-mono text-xs font-bold disabled:opacity-40 flex items-center gap-2"
                         >
                           <Camera className="w-4 h-4" />
-                          Enable Camera
+                          Enable Camera & Microphone
                         </button>
                       )}
                       {!isRecording ? (
                         <button
                           onClick={startRecording}
-                          disabled={isLoading || isComplete || cameraStatus !== 'ready'}
+                          disabled={isLoading || isComplete || cameraStatus !== 'ready' || microphoneStatus !== 'ready'}
                           className="rounded-lg bg-red-500 text-white px-4 py-2 font-mono text-xs font-bold disabled:opacity-40 flex items-center gap-2"
                         >
                           <Video className="w-4 h-4" />

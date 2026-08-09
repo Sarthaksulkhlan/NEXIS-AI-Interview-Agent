@@ -1,13 +1,11 @@
 import express from 'express';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
 import dotenv from 'dotenv';
 
 dotenv.config();
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const __dirname = process.cwd();
 
 const app = express();
 const PORT = 3000;
@@ -70,6 +68,9 @@ const proxyInterviewBackend = async (req: express.Request, res: express.Response
 // Friend backend pass-through. This preserves the real FastAPI /api/interview contract.
 app.all('/api/interview', proxyInterviewBackend);
 app.all('/api/session/:sessionId', proxyInterviewBackend);
+app.all('/api/candidates', proxyInterviewBackend);
+app.all('/api/interview/:sessionId/integrity', proxyInterviewBackend);
+app.all('/api/interview/:sessionId/integrity/events', proxyInterviewBackend);
 
 // Vite Development or Production Server Static Middleware
 async function startServer() {

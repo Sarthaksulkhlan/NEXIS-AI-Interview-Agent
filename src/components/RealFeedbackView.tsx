@@ -1,7 +1,7 @@
-import React from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, CheckCircle, RotateCcw, Route, ShieldAlert } from 'lucide-react';
 import { CandidateProfile } from '../types';
-import { FeedbackReport } from '../services/interviewApi';
+import { FeedbackReport, IntegritySummary, InterviewApiService, SessionStateResponse } from '../services/interviewApi';
 
 interface RealFeedbackViewProps {
   feedback: FeedbackReport | null;
@@ -16,6 +16,33 @@ export const RealFeedbackView: React.FC<RealFeedbackViewProps> = ({
   sessionId,
   onRetakeSession,
 }) => {
+  const [session, setSession] = useState<SessionStateResponse | null>(null);
+  const [integrity, setIntegrity] = useState<IntegritySummary | null>(null);
+
+  useEffect(() => {
+    if (!sessionId) return;
+    void Promise.all([
+      InterviewApiService.getSessionState(sessionId),
+      InterviewApiService.getIntegritySummary(sessionId).catch(() => null),
+    ]).then(([nextSession, nextIntegrity]) => {
+      setSession(nextSession);
+      setIntegrity(nextIntegrity);
+    });
+  }, [sessionId]);
+
+  const curriculumBreakdown = useMemo(() => {
+    if (!session) return [];
+    return [...new Set(session.question_log.map((question) => question.day))].map((day) => {
+      const questions = session.question_log.filter((question) => question.day === day);
+      const answers = session.answer_log.filter((item) => item.day === day);
+      const average = answers.length
+        ? answers.reduce((sum, item) => sum + item.evaluation.scores.correctness, 0) / answers.length
+        : 0;
+      return { day, topic: questions[0]?.topic || `Day ${day}`, questions: questions.length, correctness: average.toFixed(1) };
+    });
+  }, [session]);
+  const multimodalLog = session?.multimodal_log ?? [];
+
   if (!feedback) {
     return (
       <div className="w-full max-w-[1000px] mx-auto px-4 md:px-10 py-16">
@@ -58,6 +85,64 @@ export const RealFeedbackView: React.FC<RealFeedbackViewProps> = ({
         <FeedbackList title="Strengths" icon="strength" items={feedback.strengths} />
         <FeedbackList title="Gaps" icon="gap" items={feedback.gaps} />
         <FeedbackList title="Next Steps" icon="next" items={feedback.next} />
+      </section>
+
+      {session && (
+        <section className="bg-[#0c0e12]/90 border border-[#1f2937] p-6 md:p-8 rounded-xl space-y-5">
+          <h2 className="text-lg font-semibold">Per-question analysis</h2>
+          {session.question_log.map((question) => {
+            const answerItem = session.answer_log.find((item) => item.question_id === question.id);
+            return (
+              <article key={question.id} className="border border-[#323539] rounded-lg p-4 space-y-2">
+                <div className="font-mono text-xs text-[#00dce5]">Q{question.id} · Day {question.day} · {question.topic} · {question.difficulty}{question.is_followup ? ' · Follow-up' : ''}</div>
+                <p className="font-semibold">{question.text}</p>
+                <p className="text-sm text-[#b9caca]"><span className="text-[#e1e2e7]">Answer:</span> {answerItem?.text || 'No answer recorded.'}</p>
+                {answerItem && (
+                  <div className="text-sm text-[#b9caca]">
+                    Evaluation: <span className="text-[#d0bcff]">{answerItem.evaluation.pattern}</span> · Correctness {answerItem.evaluation.scores.correctness}/10 · Depth {answerItem.evaluation.scores.depth}/10 · Reasoning {answerItem.evaluation.scores.reasoning}/10
+                    {answerItem.evaluation.rationale && <p className="mt-1">{answerItem.evaluation.rationale}</p>}
+                  </div>
+                )}
+              </article>
+            );
+          })}
+        </section>
+      )}
+
+      {curriculumBreakdown.length > 0 && (
+        <section className="bg-[#0c0e12]/90 border border-[#1f2937] p-6 md:p-8 rounded-xl">
+          <h2 className="text-lg font-semibold mb-4">Curriculum breakdown</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {curriculumBreakdown.map((item) => (
+              <div key={item.day} className="border border-[#323539] rounded-lg p-4 text-sm">
+                <div className="text-[#00dce5] font-mono">Day {item.day} · {item.topic}</div>
+                <div className="text-[#b9caca] mt-1">{item.questions} question(s) · Average correctness {item.correctness}/10</div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {multimodalLog.length > 0 && (
+        <section className="bg-[#0c0e12]/90 border border-[#1f2937] p-6 md:p-8 rounded-xl">
+          <h2 className="text-lg font-semibold mb-3">Communication and media assessment</h2>
+          <div className="space-y-2 text-sm text-[#b9caca]">
+            {multimodalLog.map((item) => (
+              <p key={item.question_id}>Question {item.question_id}: {item.communication_feedback || 'No communication observation returned.'}</p>
+            ))}
+          </div>
+        </section>
+      )}
+
+      <section className="bg-[#0c0e12]/90 border border-[#1f2937] p-6 md:p-8 rounded-xl">
+        <h2 className="text-lg font-semibold mb-3">Integrity summary</h2>
+        {integrity ? (
+          <div className="text-sm text-[#b9caca] space-y-2">
+            <p>Status: <span className="text-[#00dce5]">{integrity.risk_level}</span> · Score {integrity.risk_score}/100 · {integrity.event_count} supported event(s)</p>
+            {integrity.reasons.length > 0 && <ul className="list-disc pl-5">{integrity.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>}
+            <p>Integrity signals are review aids and are not automatic cheating determinations.</p>
+          </div>
+        ) : <p className="text-sm text-[#b9caca]">No integrity summary was available for this session.</p>}
       </section>
 
       <div className="pt-4 flex justify-center">
