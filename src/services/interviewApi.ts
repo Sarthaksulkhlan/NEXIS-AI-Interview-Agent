@@ -86,6 +86,12 @@ const parseError = async (response: Response, fallback: string) => {
   }
 };
 
+const getBaseUrl = () => {
+  // Use direct backend URL if provided via Vercel/Vite env vars (requires backend CORS).
+  // Otherwise defaults to relative path, leveraging the local server.ts proxy.
+  return import.meta.env?.VITE_INTERVIEW_BACKEND_URL || '';
+};
+
 export class InterviewApiService {
   static async startInterview(
     sessionId: string,
@@ -104,7 +110,7 @@ export class InterviewApiService {
       focus_areas: [candidate.member.jobRole]
     };
 
-    const response = await fetch('/api/interview', {
+    const response = await fetch(`${getBaseUrl()}/api/interview`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ sessionId, candidate: backendCandidate }),
@@ -118,7 +124,7 @@ export class InterviewApiService {
   }
 
   static async sendTurn(sessionId: string, message: string): Promise<InterviewResponse> {
-    const response = await fetch('/api/interview', {
+    const response = await fetch(`${getBaseUrl()}/api/interview`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ sessionId, message }),
@@ -133,7 +139,7 @@ export class InterviewApiService {
 
   static async getSessionState(sessionId: string): Promise<SessionStateResponse | null> {
     try {
-      const response = await fetch(`/api/session/${encodeURIComponent(sessionId)}`);
+      const response = await fetch(`${getBaseUrl()}/api/session/${encodeURIComponent(sessionId)}`);
       if (!response.ok) return null;
       const body = (await response.json()) as SessionStateResponse;
       return {
@@ -153,7 +159,7 @@ export class InterviewApiService {
     formData.append('questionId', String(questionId));
     formData.append('video', videoBlob, 'recording.webm');
 
-    const response = await fetch('/api/interview/video', {
+    const response = await fetch(`${getBaseUrl()}/api/interview/video`, {
       method: 'POST',
       body: formData,
     });
@@ -170,7 +176,7 @@ export class InterviewApiService {
     event_type: IntegrityEventType,
     metadata: Record<string, string | number> = {}
   ): Promise<IntegritySummary> {
-    const response = await fetch(`/api/interview/${encodeURIComponent(sessionId)}/integrity/events`, {
+    const response = await fetch(`${getBaseUrl()}/api/interview/${encodeURIComponent(sessionId)}/integrity/events`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ event_type, metadata }),
@@ -181,7 +187,7 @@ export class InterviewApiService {
   }
 
   static async getIntegritySummary(sessionId: string): Promise<IntegritySummary> {
-    const response = await fetch(`/api/interview/${encodeURIComponent(sessionId)}/integrity`);
+    const response = await fetch(`${getBaseUrl()}/api/interview/${encodeURIComponent(sessionId)}/integrity`);
     if (!response.ok) throw new Error(await parseError(response, 'Unable to load integrity summary.'));
     return (await response.json()) as IntegritySummary;
   }
