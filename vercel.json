@@ -2,7 +2,7 @@
   "buildCommand": "vite build",
   "outputDirectory": "dist",
   "functions": {
-    "api/[...path].js": {
+    "api/[...path].cjs": {
       "maxDuration": 60
     }
   },
