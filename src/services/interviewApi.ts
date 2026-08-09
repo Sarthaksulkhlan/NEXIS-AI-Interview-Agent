@@ -74,7 +74,13 @@ export interface IntegritySummary {
 const parseError = async (response: Response, fallback: string) => {
   try {
     const body = await response.json();
-    return body.detail || body.error || fallback;
+    if (body.detail) {
+      if (typeof body.detail === 'string') return body.detail;
+      if (Array.isArray(body.detail)) {
+        return body.detail.map((e: any) => `${e.loc?.join('.')}: ${e.msg}`).join(' | ');
+      }
+    }
+    return body.error || fallback;
   } catch {
     return fallback;
   }
@@ -85,10 +91,23 @@ export class InterviewApiService {
     sessionId: string,
     candidate: CandidateRecord
   ): Promise<InterviewResponse> {
+    // Map the local CandidateRecord to the exact schema the backend expects
+    const backendCandidate = {
+      member: {
+        id: candidate.member.id,
+        name: candidate.member.name,
+        cohort: candidate.member.education || 'Unknown',
+        github: candidate.member.name.toLowerCase().replace(/\s/g, '')
+      },
+      days_completed: candidate.missions.filter(m => m.passed || m.attempts && m.attempts > 0).map(m => m.day),
+      strengths: ['Python', 'Software Engineering'], 
+      focus_areas: [candidate.member.jobRole]
+    };
+
     const response = await fetch('/api/interview', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId, candidate }),
+      body: JSON.stringify({ sessionId, candidate: backendCandidate }),
     });
 
     if (!response.ok) {
