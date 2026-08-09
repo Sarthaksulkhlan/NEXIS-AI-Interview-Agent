@@ -15,6 +15,7 @@ const proxyRawInterviewBackend = async (req: express.Request, res: express.Respo
   try {
     const target = `${INTERVIEW_BACKEND_URL}${req.originalUrl}`;
     console.log(`[proxy] RAW ${req.method} ${req.originalUrl} -> ${target}`);
+    console.log('[proxy] RAW headers:', JSON.stringify(req.headers));
     const headers: Record<string, string> = {};
     const contentType = req.headers['content-type'];
     if (contentType) headers['Content-Type'] = Array.isArray(contentType) ? contentType[0] : contentType;
@@ -25,10 +26,13 @@ const proxyRawInterviewBackend = async (req: express.Request, res: express.Respo
       body: req.method === 'GET' || req.method === 'HEAD' ? undefined : req as any,
       duplex: 'half' as any,
     } as any);
-
     const responseType = response.headers.get('content-type') || 'application/json';
+    const responseText = await response.text();
+    if (response.status >= 400) {
+      console.error('[proxy] RAW backend error', { target, status: response.status, body: responseText.length > 10000 ? responseText.slice(0, 10000) + '... [truncated]' : responseText });
+    }
     res.status(response.status).type(responseType);
-    res.send(await response.text());
+    res.send(responseText);
   } catch (error) {
     console.error('Interview backend raw proxy error:', error);
     res.status(503).json({ detail: 'Interview service unavailable. Please try again.' });
@@ -48,6 +52,9 @@ const proxyInterviewBackend = async (req: express.Request, res: express.Response
   try {
     const target = `${INTERVIEW_BACKEND_URL}${req.originalUrl}`;
     console.log(`[proxy] ${req.method} ${req.originalUrl} -> ${target}`);
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+      try { console.log('[proxy] REQ body:', JSON.stringify(req.body).slice(0, 10000)); } catch (e) { console.log('[proxy] REQ body: <unserializable>'); }
+    }
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
     };
@@ -59,8 +66,12 @@ const proxyInterviewBackend = async (req: express.Request, res: express.Response
     });
 
     const contentType = response.headers.get('content-type') || 'application/json';
+    const responseText = await response.text();
+    if (response.status >= 400) {
+      console.error('[proxy] backend error', { target, status: response.status, body: responseText.length > 10000 ? responseText.slice(0,10000) + '... [truncated]' : responseText });
+    }
     res.status(response.status).type(contentType);
-    res.send(await response.text());
+    res.send(responseText);
   } catch (error) {
     console.error('Interview backend proxy error:', error);
     res.status(503).json({ detail: 'Interview service unavailable. Please try again.' });
