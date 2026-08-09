@@ -14,6 +14,7 @@ const INTERVIEW_BACKEND_URL = process.env.INTERVIEW_BACKEND_URL || 'http://127.0
 const proxyRawInterviewBackend = async (req: express.Request, res: express.Response) => {
   try {
     const target = `${INTERVIEW_BACKEND_URL}${req.originalUrl}`;
+    console.log(`[proxy] RAW ${req.method} ${req.originalUrl} -> ${target}`);
     const headers: Record<string, string> = {};
     const contentType = req.headers['content-type'];
     if (contentType) headers['Content-Type'] = Array.isArray(contentType) ? contentType[0] : contentType;
@@ -46,6 +47,7 @@ app.get('/api/health', (_req, res) => {
 const proxyInterviewBackend = async (req: express.Request, res: express.Response) => {
   try {
     const target = `${INTERVIEW_BACKEND_URL}${req.originalUrl}`;
+    console.log(`[proxy] ${req.method} ${req.originalUrl} -> ${target}`);
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
     };
