@@ -1,24 +1,21 @@
 /**
- * Vercel Serverless Proxy
+ * Vercel Serverless Proxy — api/[...path].js
  *
- * All /api/* requests from the frontend are caught here.
- * This function reads INTERVIEW_BACKEND_URL (server-side env var) and
- * proxies the request to the Python FastAPI backend.
+ * Routes all /api/* requests from the frontend to the FastAPI backend.
+ * Reads INTERVIEW_BACKEND_URL from Vercel environment variables (server-side).
  *
- * This avoids:
- *  - CORS issues (backend only talks to this server-side function)
- *  - Exposing the backend URL in the browser bundle
- *  - Needing a VITE_ prefix for the env var
+ * Key fixes:
+ *  - bodyParser disabled so we can forward raw multipart/form-data for video uploads
+ *  - accept-encoding stripped from forwarded request so backend sends plain (uncompressed) JSON
+ *  - content-encoding/content-length stripped from response so browser doesn't try to decompress already-decoded data
  */
-
-// Vercel parses JSON bodies automatically — disable that for raw forwarding
 export const config = {
   api: {
     bodyParser: false,
   },
 };
 
-function getRawBody(req) {
+function readRawBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = [];
     req.on('data', (chunk) => chunks.push(chunk));
@@ -30,19 +27,24 @@ function getRawBody(req) {
 export default async function handler(req, res) {
   const BACKEND_URL = (process.env.INTERVIEW_BACKEND_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');
 
-  // Reconstruct the full path: /api/[...path] → e.g. ["interview", "video"]
+  // Reconstruct path: req.query.path = ['interview'] → '/api/interview'
   const { path } = req.query;
   const pathString = Array.isArray(path) ? path.join('/') : (path || '');
   const target = `${BACKEND_URL}/api/${pathString}`;
 
-  console.log(`[proxy] ${req.method} ${req.url} → ${target}`);
+  console.log(`[proxy] ${req.method} /api/${pathString} → ${target}`);
 
   try {
-    // Forward headers but strip host to avoid backend rejecting the request
+    // Strip headers that should not be forwarded
+    const SKIP_REQUEST_HEADERS = new Set([
+      'host',
+      'connection',
+      'transfer-encoding',
+      'accept-encoding', // ← prevent backend from gzip-encoding; fetch auto-decompresses but keeps the header
+    ]);
     const forwardHeaders = {};
-    const skipHeaders = new Set(['host', 'connection', 'transfer-encoding']);
     for (const [key, value] of Object.entries(req.headers)) {
-      if (!skipHeaders.has(key.toLowerCase())) {
+      if (!SKIP_REQUEST_HEADERS.has(key.toLowerCase())) {
         forwardHeaders[key] = value;
       }
     }
@@ -50,32 +52,37 @@ export default async function handler(req, res) {
     const fetchOptions = {
       method: req.method,
       headers: forwardHeaders,
-      redirect: 'follow',
     };
 
-    // Attach body for non-GET/HEAD requests
+    // Forward body for non-GET/HEAD methods
     if (req.method !== 'GET' && req.method !== 'HEAD') {
-      fetchOptions.body = await getRawBody(req);
+      fetchOptions.body = await readRawBody(req);
+      // duplex required by Node 18+ fetch when body is a stream/buffer
       fetchOptions.duplex = 'half';
     }
 
-    const backendResponse = await fetch(target, fetchOptions);
+    const backendRes = await fetch(target, fetchOptions);
 
-    // Forward response status and headers
-    res.status(backendResponse.status);
-    for (const [key, value] of backendResponse.headers.entries()) {
-      // Skip headers that would conflict with Vercel's own response handling
-      if (!['transfer-encoding', 'connection'].includes(key.toLowerCase())) {
+    // Strip response headers that would cause decoding issues
+    const SKIP_RESPONSE_HEADERS = new Set([
+      'transfer-encoding',
+      'connection',
+      'content-encoding', // ← fetch already decoded; removing prevents ERR_CONTENT_DECODING_FAILED
+      'content-length',   // ← decoded body may differ in length; let Node compute it
+    ]);
+
+    res.status(backendRes.status);
+    for (const [key, value] of backendRes.headers.entries()) {
+      if (!SKIP_RESPONSE_HEADERS.has(key.toLowerCase())) {
         res.setHeader(key, value);
       }
     }
 
-    // Stream the response body back
-    const buffer = Buffer.from(await backendResponse.arrayBuffer());
+    const buffer = Buffer.from(await backendRes.arrayBuffer());
     res.send(buffer);
 
   } catch (error) {
-    console.error('[proxy] Error:', error);
+    console.error('[proxy] Fetch error:', error);
     res.status(503).json({ detail: 'Interview service unavailable. Please try again.' });
   }
 }
