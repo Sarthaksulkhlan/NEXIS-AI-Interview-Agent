@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { CandidateProfile, CurriculumData, CandidateMission } from '../types';
-import { curriculumData, allCandidateProfiles } from '../data/dataLoader';
+import { curriculumData } from '../data/dataLoader';
 import {
   ArrowRight,
   Cpu,
@@ -24,6 +24,7 @@ import {
 
 interface DashboardViewProps {
   candidate: CandidateProfile;
+  allProfiles: CandidateProfile[];
   onUpdateCandidateProfile: (selectedCandidate: CandidateProfile) => void;
   onStartInterview: () => void;
 }
@@ -36,6 +37,7 @@ const HERO_PHRASES = [
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
   candidate,
+  allProfiles,
   onUpdateCandidateProfile,
   onStartInterview,
 }) => {
@@ -83,8 +85,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     return () => clearTimeout(timer);
   }, [displayText, isDeleting, phraseIndex]);
 
-  // Filter candidates by search term
-  const filteredCandidates = allCandidateProfiles.filter(
+  // Filter candidates by search term against the live profiles list
+  const filteredCandidates = allProfiles.filter(
     (c) =>
       c.name.toLowerCase().includes(candidateSearch.toLowerCase()) ||
       c.targetRole.toLowerCase().includes(candidateSearch.toLowerCase())
@@ -205,7 +207,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     </p>
                   </div>
                   <span className="font-mono text-[10px] text-[#00dce5] bg-[#05070a] px-2 py-1 rounded border border-[#00dce5]/30 font-bold shrink-0">
-                    {allCandidateProfiles.length} PROFILES
+                    {allProfiles.length} PROFILES
                   </span>
                 </div>
 
@@ -218,12 +220,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     <select
                       value={candidate.id}
                       onChange={(e) => {
-                        const found = allCandidateProfiles.find((c) => c.id === e.target.value);
+                        const found = allProfiles.find((c) => c.id === e.target.value);
                         if (found) onUpdateCandidateProfile(found);
                       }}
                       className="w-full bg-[#05070a] border-2 border-[#00dce5] text-[#e1e2e7] font-mono text-xs px-3.5 py-3 rounded-lg appearance-none focus:outline-none focus:border-[#63f7ff] cursor-pointer pr-10 shadow-[0_0_15px_rgba(0,220,229,0.2)] font-semibold"
                     >
-                      {allCandidateProfiles.map((c) => (
+                      {allProfiles.map((c) => (
                         <option key={c.id} value={c.id} className="bg-[#05070a] text-white">
                           {c.name} — {c.targetRole} ({c.signals.missionsCompleted} missions)
                         </option>

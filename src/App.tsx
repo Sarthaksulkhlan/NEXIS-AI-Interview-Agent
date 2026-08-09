@@ -30,7 +30,12 @@ const viewForPath = (): ViewMode => {
 export default function App() {
   const [currentView, setCurrentView] = useState<ViewMode>(viewForPath);
   const [activeModal, setActiveModal] = useState<ModalType>(null);
+
+  // Candidates come from the local demo data in src/data/candidate.json.
+  // The selected candidate's rawRecord is forwarded to the backend on interview start
+  // via POST /api/interview so the AI can personalise its questions.
   const [candidate, setCandidate] = useState<CandidateProfile>(allCandidateProfiles[0]);
+
   const [realFeedback, setRealFeedback] = useState<FeedbackReport | null>(() => {
     try {
       const raw = sessionStorage.getItem(INTERVIEW_FEEDBACK_KEY);
@@ -113,6 +118,7 @@ export default function App() {
         {currentView === 'dashboard' && (
           <DashboardView
             candidate={candidate}
+            allProfiles={allCandidateProfiles}
             onUpdateCandidateProfile={handleSelectCandidateProfile}
             onStartInterview={handleStartInterview}
           />
