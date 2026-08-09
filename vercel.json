@@ -3,7 +3,8 @@
   "outputDirectory": "dist",
   "functions": {
     "api/[...path].js": {
-      "runtime": "nodejs18.x"
+      "runtime": "nodejs18.x",
+      "maxDuration": 60
     }
   },
   "rewrites": [

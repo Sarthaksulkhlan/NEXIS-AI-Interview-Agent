@@ -2,22 +2,21 @@
  * Vercel Serverless Proxy — api/[...path].js
  *
  * Catches all /api/* requests and proxies them to INTERVIEW_BACKEND_URL.
- * Uses CommonJS to avoid ESM/CJS conflicts from "type": "module" in package.json.
+ * Uses req.url to get the exact path — avoids query-param reconstruction bugs.
  */
 
-const { Readable } = require('stream');
-
-// Disable Vercel's automatic body parsing so we can forward the raw body
-// (needed for multipart/form-data video uploads)
 async function handler(req, res) {
-  const BACKEND_URL = (process.env.INTERVIEW_BACKEND_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');
+  const raw = (process.env.INTERVIEW_BACKEND_URL || 'http://127.0.0.1:8000');
 
-  // Build target URL from the catch-all path segments
-  const { path } = req.query;
-  const pathString = Array.isArray(path) ? path.join('/') : (path || '');
-  const target = `${BACKEND_URL}/api/${pathString}`;
+  // Strip trailing slash AND any trailing /api so we never get /api/api/...
+  const BACKEND_ORIGIN = raw.replace(/\/api\/?$/, '').replace(/\/$/, '');
 
-  console.log(`[proxy] ${req.method} /api/${pathString} → ${target}`);
+  // req.url is the full path+query e.g. "/api/interview" or "/api/session/abc?foo=bar"
+  // We only want the path portion (no query string — Vercel injects ?...path=... internally)
+  const targetPath = req.url ? req.url.split('?')[0] : `/api/`;
+  const target = `${BACKEND_ORIGIN}${targetPath}`;
+
+  console.log(`[proxy] ${req.method} ${targetPath} → ${target}`);
 
   try {
     // Collect raw request body
@@ -27,7 +26,7 @@ async function handler(req, res) {
     }
     const rawBody = Buffer.concat(chunks);
 
-    // Strip headers that shouldn't be forwarded
+    // Strip headers that shouldn't be forwarded to the backend
     const SKIP_REQUEST = new Set(['host', 'connection', 'transfer-encoding', 'accept-encoding']);
     const forwardHeaders = {};
     for (const [key, value] of Object.entries(req.headers)) {
@@ -47,7 +46,7 @@ async function handler(req, res) {
 
     const backendRes = await fetch(target, fetchOptions);
 
-    // Strip response headers that cause decoding issues
+    // Strip response headers that cause browser decoding issues
     const SKIP_RESPONSE = new Set(['transfer-encoding', 'connection', 'content-encoding', 'content-length']);
     res.status(backendRes.status);
     for (const [key, value] of backendRes.headers.entries()) {
